@@ -9,19 +9,21 @@ draft: false
 
 # Overviews
 
-Nest는 SQL, no-SQL 데이터베이스 유명 라이브러리와 호환 가능합니다.
-주로 많은 사람들이 TypeORM, Sequelize를 연동하여 사용하고 있습니다.
-그 밖에 Prisma, MikroORM 등과 호환 가능합니다.
+`nest.js`는 SQL, no-SQL 데이터베이스 유명 라이브러리와 호환 가능합니다.
+주로 많은 사람들이 `TypeORM`, `Sequelize`를 연동하여 사용하고 있습니다.
+그 밖에 `Prisma`, `MikroORM` 등과 호환 가능합니다.
 
-이 글에서는 TypeORM과 Nestjs를 연동하는 법을 알아보면서 생기는 궁금점을 파헤쳐 보도록 하겠습니다.
+이 글에서는 `TypeORM`과 `nest.js`를 연동하는 법을 알아보면서 생기는 궁금점을 파헤쳐 보도록 하겠습니다.
 
 # Installation
+
+설치해서 세팅하는 법은 간단합니다.
 
 ```bash showLineNumbers
 $ npm install --save @nestjs/typeorm typeorm mysql2
 ```
 
-그리고 보통 AppModule에 TypeOrmModule을 넣어 초기화합니다.
+그리고 보통 `AppModule`에 `TypeOrmModule`을 넣어 초기화합니다.
 
 ```ts:app.module.ts {6-15} showLineNumbers
 import { Module } from '@nestjs/common'
@@ -44,29 +46,42 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 export class AppModule {}
 ```
 
-위 코드에서 forRoot에 들어가는 객체는 [`ormconfig.json`](https://github.com/typeorm/typeorm/blob/master/docs/using-ormconfig.md)에 들어가는 값이랑 같습니다.
+위 코드에서 `forRoot`에 들어가는 객체는 [`ormconfig.json`](https://github.com/typeorm/typeorm/blob/master/docs/using-ormconfig.md)에 들어가는 값과 같습니다.
 
-프로젝트를 많이 만들다 보면 옵션 키 값 중 `entities` 속성이 말썽을 부릴 때가 많습니다. 보통 프로젝트 내에서 사용하는 모든 entity를 참조하기 위해 사용하는 관례 코드는 다음과 같습니다.
+프로젝트를 많이 만들다 보면 옵션 키 값 중 `entities` 속성이 말썽을 부릴 때가 많습니다. 보통 프로젝트 내에서 사용하는 모든 `entity`를 참조하기 위해 사용하는 관례 코드는 다음과 같습니다.
 
 ```ts
 entities: './dist/**/*.entity.js'
 ```
 
-보통 nest.js 프로젝트를 타입스크립트로 작업하면, 개발환경에서 watch모드로 실시간 빌드를 해주기 때문에 dist 폴더에 트랜스파일링된 js 파일들이 만들어집니다. 여기에서 entity 파일들을 스캔하여 엔티티들을 실제 DB와 연결해줍니다.
+보통 `nest.js` 프로젝트를 타입스크립트로 작업하면, 개발환경에서 watch 모드로 실시간 빌드를 해주기 때문에 `dist` 폴더에 트랜스파일링된 `js` 파일들이 만들어집니다. 여기에서 `entity` 파일들을 스캔하여 엔티티들을 실제 DB와 연결해줍니다.
 
-하지만 nest.js를 [monorepo](https://docs.nestjs.com/cli/monorepo) 방식으로 변경하여 작업하면, 웹팩 빌드로 변경되기 때문에 dist에 파일이 하나로 뭉쳐져서 만들어집니다. 그럼 기존의 glob 방식으로 파일 경로로 entity 들을 스캔할 수 없게 됩니다.
+하지만 `nest.js`를 [monorepo](https://docs.nestjs.com/cli/monorepo) 방식으로 변경하여 작업하면, 웹팩 빌드로 변경되기 때문에 `dist`에 파일이 하나로 뭉쳐져서() 만들어집니다. 그럼 기존의 `glob` 방식으로 파일 경로로 `entity` 들을 스캔할 수 없게 됩니다.
 
-따라서 @nestjs/typeorm 패키지에서 제공해주는 `autoLoadEntities` 속성을 이용하면 더 쉽게 엔티티를 연결할 수 있습니다.
+따라서 `nest` 팀은 이를 인지하고 `@nestjs/typeorm` 패키지에 `autoLoadEntities` 속성을 만들어 제공해주고 있습니다. 이를 이용하면 더 쉽게 엔티티를 연결할 수 있습니다.
 
 ![](/static/images/blog/nestjs-docs-techniques-database/1.png)
 
-그러면 대체 autoLoadEntities 속성은 어떻게 entity 들을 스캔하는 걸까요? 그리고 또 다른 방법은 없을까요? (nestjs에 의존하지 않고 typeorm만을 이용하여 참조하는 법 등)
+```ts:app.module.ts {5} showLineNumbers
+@Module({
+  imports: [
+    TypeOrmModule.forRoot({
+      ...
+      autoLoadEntities: true,
+    }),
+  ],
+})
+```
+
+그러면 대체 `autoLoadEntities` 속성은 어떻게 `entity` 들을 스캔하는 걸까요? 그리고 또 다른 방법은 없을까요?
 
 # 코드베이스로 엔티티 참조
 
-먼저 @nestjs/typeorm 소스를 보면 autoLoadEntities가 어떻게 구현되어 있는지 알 수 있습니다.
+먼저 `@nestjs/typeorm` 소스를 보면 `autoLoadEntities`가 어떻게 구현되어 있는지 알 수 있습니다. 주석과 하이라이팅 된 곳만 보세요.
 
-```ts:typeorm-core.module.ts {15-17, 19-20}showLineNumbers
+## @nestjs/typeorm
+
+```ts:@nestjs/typeorm:lib/typeorm-core.module.ts {15-17, 19-20}showLineNumbers
 private static async createConnectionFactory(
   options: TypeOrmModuleOptions,
   connectionFactory?: TypeOrmConnectionFactory,
@@ -95,12 +110,13 @@ private static async createConnectionFactory(
    ...
 ```
 
-위 코드를 보면 autoLoadEntities가 참일 시 `EntitiesMetadataStorage.getEntitiesByConnection(connectionToken)`를 호출하여 엔티티 리스트를 가져와 합쳐주는 것을 볼 수 있습니다.
-함수명으로 짐작건대, 위 코드는 현재 연결되어 있는 커넥션을 통해 엔티티를 가져올 것입니다.
+위 코드를 보면 `autoLoadEntities`가 참일 시 `EntitiesMetadataStorage.getEntitiesByConnection(connectionToken)`를 호출하여 엔티티 리스트를 가져와 합쳐주는 것을 볼 수 있습니다.
 
-해당 함수도 @nestjs/typeorm에 구현되어 있습니다.
+함수명으로 짐작건대, `EntitiesMetadataStorage`라는 글로벌 저장소에서 엔티티를 가져올 것입니다.
 
-```ts:entities-metadata.storage.ts showLineNumbers
+위에서 사용된 `EntitiesMetadataStorage` 클래스도 `@nestjs/typeorm`에 구현되어 있습니다.
+
+```ts:@nestjs/typeorm:lib/entities-metadata.storage.ts showLineNumbers
 import { Connection, ConnectionOptions } from 'typeorm'
 import { EntityClassOrSchema } from './interfaces/entity-class-or-schema.type'
 
@@ -142,16 +158,16 @@ export class EntitiesMetadataStorage {
 }
 ```
 
-EntitiesMetadataStorage 클래스는 정적 함수로만 이루어져있으며, 다음 두 함수가 있습니다.
+`EntitiesMetadataStorage` 클래스는 정적 함수로만 이루어져있으며, 다음 두 함수가 있습니다.
 
 - `addEntitiesByConnection`: connectionToken 키 값에 Entity 리스트를 추가합니다.
 - `getEntitiesByConnection`: connectionToken 키 값 안에 저장된 모든 Entity 리스트를 가져옵니다.
 
-즉, 미리 addEntitiesByConnection를 통해 추가된 엔티티 리스트를 getEntitiesByConnection 함수를 통해 가져와 엔티티들을 실제 DB와 연동합니다.
+즉, 미리 `addEntitiesByConnection`를 통해 엔티티를 추가하고, `getEntitiesByConnection`로 가져와 엔티티들을 실제 DB와 연동합니다.
 
-그럼 마지막으로 어디서 addEntitiesByConnection 함수를 호출하는지 살펴보겠습니다.
+그럼 마지막으로 어디서 `addEntitiesByConnection` 함수를 호출하는지 살펴보겠습니다.
 
-```ts:typeorm.module.ts {10-13} showLineNumbers
+```ts:@nestjs/typeorm:lib/typeorm.module.ts {10-13} showLineNumbers
 @Module({})
 export class TypeOrmModule {
   ...
@@ -181,7 +197,7 @@ export class TypeOrmModule {
 
 그 내부 구현에서 `EntitiesMetadataStorage`에 엔티티를 넣어주는 것이었습니다.
 
-그럼 우리가 작성한 `forFeature` 함수가 모두 실행되고 마지막으로 AppModule의 `TypeOrmModule.forFeature`가 실행되야 겠죠? 이는 어떻게 확인할 수 있을까요?
+그럼 우리가 작성한 `forFeature` 함수가 모두 실행되고 마지막으로 `AppModule`의 `TypeOrmModule.forFeature`가 실행되야 겠죠? 이는 어떻게 확인할 수 있을까요?
 
 코드를 분석하며 찾아볼 수도 있겠지만, <u>더 쉬운 방법</u>이 있습니다.
 
@@ -204,9 +220,9 @@ export class TypeOrmModule {
 })
 ```
 
-그리고 node_modules 폴더 내부의 @nestjs/typeorm에 들어가 forFeature 구현부에 다음 소스를 추가합니다.
+그리고 `node_modules` 폴더 내부의 `@nestjs/typeorm`에 들어가 `forFeature` 구현부에 다음 소스를 추가합니다.
 
-```ts:@nestjs/typeorm/dist/typeorm.module.js {5} showLineNumbers
+```ts:node_modules/@nestjs/typeorm/dist/typeorm.module.js {5} showLineNumbers
 ...
 static forFeature(entities = [], connection = typeorm_constants_1.DEFAULT_CONNECTION_NAME) {
   const providers = typeorm_providers_1.createTypeOrmProviders(entities, connection);
@@ -229,10 +245,84 @@ static forFeature(entities = [], connection = typeorm_constants_1.DEFAULT_CONNEC
 
 _대충 엔티티가 먼저 잘 나온다는 짤입니다._
 
-위와 같이 forRoot 전에 모든 엔티티가 잘 불러와진다는 것을 확인할 수 있습니다.
+위와 같이 `forRoot` 전에 모든 엔티티가 잘 불러와진다는 것을 확인할 수 있습니다.
 
-이렇게 @nestjs/typeorm에서 `autoLoadEntities` 값을 참으로 주면 엔티티 로드 프로세스는 다음과 같습니다.
+이렇게 `@nestjs/typeorm`에서 `autoLoadEntities` 값을 참으로 주면 엔티티 로드 프로세스는 다음과 같습니다.
 
 1. `forFeature`를 통해 `EntitiesMetadataStorage` 글로벌 스토어에 엔티티를 추가합니다.
-2. 모든 forFeature가 불린 후, forRoot 함수가 실행되어 `EntitiesMetadataStorage`에 저장된 엔티티 목록을 가져옵니다.
-3. 해당 엔티티 리스트를 typeorm configuration에 넣어 실제 DB와 연결합니다.
+2. 모든 `forFeature`가 불린 후, `forRoot` 함수가 실행되어 `EntitiesMetadataStorage`에 저장된 엔티티 목록을 가져옵니다.
+3. 해당 엔티티 리스트를 `typeorm` 설정에 넣어 실제 DB와 연결합니다.
+
+## typeorm
+
+`@nestjs/typeorm`를 쓰지 않고도 `typeorm` 패키지만 이용하여 구현 가능합니다. 사실 `@nestjs/typeorm` 에서 `EntitiesMetadataStorage` 글로벌 저장소를 이용하는게 `typeorm` 에서 구현된 코드와 비슷합니다.
+
+먼저 결론만 말씀드리면 다음 코드로 엔티티를 호출 할 수 있습니다.
+
+```ts:app.module.ts {6} showLineNumbers
+import { getMetadataArgsStorage } from 'typeorm'
+
+@Module({
+  imports: [
+    TypeOrmModule.forRoot({
+      entities: getMetadataArgsStorage().tables.map((tbl) => tbl.target),
+    }),
+  ],
+})
+```
+
+`getMetadataArgsStorage` 가 글로벌 저장소 역할을 합니다. `typeorm` 소스를 보면 다음과 같습니다.
+
+```ts:typeorm:src/global.ts showLineNumbers
+/**
+ * Gets metadata args storage.
+ */
+export function getMetadataArgsStorage(): MetadataArgsStorage {
+    const globalScope = PlatformTools.getGlobalVariable();
+    if (!globalScope.typeormMetadataArgsStorage)
+        globalScope.typeormMetadataArgsStorage = new MetadataArgsStorage();
+
+    return globalScope.typeormMetadataArgsStorage;
+}
+
+export class MetadataArgsStorage {
+    readonly tables: TableMetadataArgs[] = [];
+    readonly trees: TreeMetadataArgs[] = [];
+    readonly entityRepositories: EntityRepositoryMetadataArgs[] = [];
+    ...
+}
+```
+
+`getMetadataArgsStorage`는 싱글톤 형태로 이루어져 있습니다.
+
+`MetadataArgsStorage` 에는 `tables` 멤버 변수가 있으며, 이는 읽기 전용입니다. 하지만 해당 클래스 내부 어디에도 `tables` 변수에 엔티티를 추가하는 코드는 볼 수 없었습니다. (캡슐화가 이상하게 되어있네요 😅) 그래서 클래스 외부에서 찾아봤습니다.
+
+찾아보니 `typeorm`의 `Entity` 데코레이터에서 추가하는 것을 확인할 수 있었습니다.
+
+```ts:typeorm:Entity.ts {6} showLineNumbers
+export function Entity(nameOrOptions?: string|EntityOptions, maybeOptions?: EntityOptions): ClassDecorator {
+    const options = (typeof nameOrOptions === "object" ? nameOrOptions as EntityOptions : maybeOptions) || {};
+    const name = typeof nameOrOptions === "string" ? nameOrOptions : options.name;
+
+    return function (target) {
+        getMetadataArgsStorage().tables.push({
+            target: target,
+            name: name,
+            type: "regular",
+            ...
+        } as TableMetadataArgs);
+    };
+}
+```
+
+즉, `Entity` 데코레이터가 걸려있는 모든 엔티티는 로드되어 `forRoot` 함수 실행 시 실제 DB와 연동될 겁니다.
+
+![](/static/images/blog/nestjs-docs-techniques-database/3.png)
+
+위처럼 `Entity`는 선언되어 있고, `forFeature`로 등록되지 않은 경우가 있다면, `typeorm` 방식으로 엔티티를 로드하면 될겁니다.
+
+# References
+
+- https://docs.nestjs.com/techniques/database
+- https://github.com/typeorm/typeorm
+- https://github.com/nestjs/typeorm
