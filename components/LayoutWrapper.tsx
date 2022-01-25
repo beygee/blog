@@ -6,7 +6,7 @@ import Footer from './Footer'
 import MobileNav from './MobileNav'
 import ThemeSwitch from './ThemeSwitch'
 import { ReactNode } from 'react'
-import Image from 'next/image'
+import Image from '@/components/Image'
 
 interface Props {
   children: ReactNode
