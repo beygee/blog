@@ -197,7 +197,7 @@ export class TypeOrmModule {
 
 그 내부 구현에서 `EntitiesMetadataStorage`에 엔티티를 넣어주는 것이었습니다.
 
-그럼 우리가 작성한 `forFeature` 함수가 모두 실행되고 마지막으로 `AppModule`의 `TypeOrmModule.forFeature`가 실행되야 겠죠? 이는 어떻게 확인할 수 있을까요?
+그럼 우리가 작성한 `forFeature` 함수가 모두 실행되고 마지막으로 `AppModule`의 `TypeOrmModule.forRoot`가 실행되야 겠죠? 이는 어떻게 확인할 수 있을까요?
 
 코드를 분석하며 찾아볼 수도 있겠지만, <u>더 쉬운 방법</u>이 있습니다.
 
