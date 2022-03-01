@@ -1,0 +1,334 @@
+---
+title: 'nestjs commander 이용하기'
+date: '2022-03-01'
+tags: ['nestjs', 'commander']
+draft: false
+---
+
+# Overviews
+
+백엔드 서버 애플리케이션을 만들다보면, 기본 API 서버 만드는 것 이외에 스크립트 형식으로 배치를 돌려야할 때가 있습니다.
+
+반복적인 일은 코드를 짜 크론잡이나 워커로 실행시키면 되지만, 특별한 이벤트같은 경우는 개발자가 스크립트를 짜서 실행시키는 경우가 대부분이죠.
+
+그런데 이런 경우 역시 반복적이면 `cli` 처럼 명령어를 만들어 두면 편합니다. 예를 들어 커머스 서비스에서 이벤트를 진행 후에 특정 유저들에게 포인트를 지급하는 경우도 있을 겁니다.
+
+이런 스크립트를 기존의 `nestjs` 프로젝트에서 실행시킬 수 있는 방법이 있습니다.
+
+# commander
+
+[commander](https://www.npmjs.com/package/commander)는 cli를 만들어주는 javascript 언어 기반 도구입니다.
+
+```ts:split.js showLineNumbers
+const { program } = require('commander');
+
+program
+  .option('--first')
+  .option('-s, --separator <char>');
+
+program.parse();
+
+const options = program.opts();
+const limit = options.first ? 1 : undefined;
+console.log(program.args[0].split(options.separator, limit));
+```
+
+위와 같이 JS로 코드를 작성한 스크립트를 실행해서 밑의 cli 형태로 이용할 수 있습니다.
+
+```bash {5}
+$ node split.js -s / --fits a/b/c
+error: unknown option '--fits'
+(Did you mean --first?)
+$ node split.js -s / --first a/b/c
+[ 'a' ] # 실행결과
+```
+
+이 `commander`를 한 번 래핑한 nestjs 모듈 중에 [nest-commander](https://nest-commander.jaymcdoniel.dev/)가 있습니다. commander를 이용해서 cli 방식으로 기존에 구현한 nestjs service 함수들을 사용할 수 있습니다.
+
+기존의 유즈케이스 API들을 모두 이용할 수 있겠죠? 쉽게 cli로 유저의 정보를 불러오거나, 포인트를 지급할 수도 있을 겁니다.
+
+# nestjs-commander
+
+먼저 기존 nestjs 프로젝트에 라이브러리를 설치합니다.
+
+```bash
+$ npm i nest-commander
+```
+
+그 후에 src/ 폴더에 다음 파일을 생성하여 코드를 작성합니다.
+
+```ts:src/script.ts showLineNumbers
+import { CommandFactory } from 'nest-commander';
+import { CommandModule } from './command.module';
+
+async function bootstrap() {
+  await CommandFactory.run(CommandModule);
+}
+
+bootstrap();
+```
+
+command.module.ts 역시 추가합니다.
+
+```ts:command.module.ts showLineNumbers
+import { Module } from '@nestjs/common'
+
+import { AppModule } from './app.module'
+import { BasicCommand } from './scripts/basic.command'
+
+@Module({
+  imports: [AppModule],
+  providers: [BasicCommand],
+  exports: [],
+})
+export class CommandModule {}
+```
+
+CommandModule은 우리가 기존 AppModule을 포함하고, BasicCommand라는 서비스를 포함합니다. 우리는 앞으로 구현할 BasicCommand에서 기존의 AppModule에 포함되어있는 여러 서비스들을 가져와서 이용할 수 있습니다.
+
+그럼 마지막으로 BasicCommand를 구현해보겠습니다.
+
+```ts:basic.command.ts showLineNumbers
+import { Command, CommandRunner, Option } from 'nest-commander'
+
+interface BasicCommandOptions {
+  string?: string
+  boolean?: boolean
+  number?: number
+}
+
+@Command({ name: 'basic', description: 'A parameter parse' })
+export class BasicCommand implements CommandRunner {
+  async run(passedParam: string[], options?: BasicCommandOptions): Promise<void> {
+    if (options?.boolean !== undefined && options?.boolean !== null) {
+      this.runWithBoolean(passedParam, options.boolean)
+    } else if (options?.number) {
+      this.runWithNumber(passedParam, options.number)
+    } else if (options?.string) {
+      this.runWithString(passedParam, options.string)
+    } else {
+      this.runWithNone(passedParam)
+    }
+  }
+
+  @Option({
+    flags: '-n, --number [number]',
+    description: 'A basic number parser',
+  })
+  parseNumber(val: string): number {
+    return Number(val)
+  }
+
+  @Option({
+    flags: '-s, --string [string]',
+    description: 'A string return',
+  })
+  parseString(val: string): string {
+    return val
+  }
+
+  @Option({
+    flags: '-b, --boolean [boolean]',
+    description: 'A boolean parser',
+  })
+  parseBoolean(val: string): boolean {
+    return JSON.parse(val)
+  }
+
+  runWithString(param: string[], option: string): void {
+    console.log({ param, string: option })
+  }
+
+  runWithNumber(param: string[], option: number): void {
+    console.log({ param, number: option })
+  }
+
+  runWithBoolean(param: string[], option: boolean): void {
+    console.log({ param, boolean: option })
+  }
+
+  runWithNone(param: string[]): void {
+    console.log({ param })
+  }
+}
+```
+
+위 예제는 [공식 문서](https://docs.nestjs.com/recipes/nest-commander)에 있는 코드 내용을 그대로 가져온 겁니다.
+
+이제 스크립트를 한 번 실행해보겠습니다.
+
+이후에 `npx ts-node -r tsconfig-paths/register src/script.ts`이라고 명령어를 치면 다음과 같은 결과가 나옵니다.
+
+> 위 명령어를 실행 할 수 있게 `ts-node`, `tsconfig-paths` 의존성을 설치해주세요.
+
+```bash showLineNumbers
+$ npx ts-node -r tsconfig-paths/register src/script.ts
+
+Usage: script [options] [command]
+
+Options:
+  -h, --help       display help for command
+
+Commands:
+  basic [options]  A parameter parse
+  help [command]   display help for command
+```
+
+위에서는 커맨드를 실행하지 않았으므로 어떤 커맨드를 실행할 수 있는지 개요와 설명이 나옵니다. 그럼 저 내용을 토대로 세부 커맨드를 실행해보겠습니다.
+
+```bash {5} showLineNumbers
+$ npx ts-node -r tsconfig-paths/register src/script.ts basic -n 123
+
+{ param: [ '123' ] }
+```
+
+콘솔에 다음과 같은 결과가 나온 것을 확인할 수 있습니다.
+
+이렇게 nestjs 프로젝트에 commander를 접목시켜보았습니다.
+
+그렇다면 Repository에 접근하여 데이터를 가져오는 것도 할 수 있을 것 같습니다.
+
+# 기존의 프로젝트 함수 활용하기
+
+BasicCommand 파일의 내용을 다음과 같이 수정합니다.
+
+```ts:basic.command.ts showLineNumbers
+import { Command, CommandRunner, Option } from 'nest-commander'
+import { UserService } from 'src/modules/user/user.service'
+
+interface UserCommandOptions {
+  email?: string
+}
+
+@Command({ name: 'user', description: 'A parameter parse' })
+export class BasicCommand implements CommandRunner {
+  constructor(private readonly userService: UserService) {}
+
+  async run(passedParam: string[], options?: UserCommandOptions): Promise<void> {
+    if (options?.email) {
+      this.findUserByEmail(passedParam)
+    } else {
+      this.findUserById(passedParam)
+    }
+  }
+
+  @Option({
+    flags: '-e, --email',
+    description: 'Email를 통해 유저를 찾습니다.',
+  })
+  parseEmail(val: string): boolean {
+    return true
+  }
+
+  findUserById(param: string[]) {
+    console.log('ID')
+    console.log({ param })
+  }
+
+  findUserByEmail(param: string[]) {
+    console.log('email')
+    console.log({ param })
+  }
+}
+```
+
+이제 다음 명령어를 치면 다음 결과가 나올 겁니다.
+
+```bash showLineNumbers
+$ npx ts-node -r tsconfig-paths/register src/script.ts user 123
+ID
+{ param: [ '123' ] }
+
+$ npx ts-node -r tsconfig-paths/register src/script.ts user -e example@naver.com
+email
+{ param: [ 'example@naver.com' ] }
+```
+
+user 뒤에 적혀있는 id 기반으로 유저를 찾고, `-e` 옵션을 주어 이메일을 추가할 경우, 해당 이메일과 일치하는 유저를 찾아보겠습니다.
+
+다음과 같이 코드를 수정합니다.
+
+```ts:basic.command.ts {15,17,29-41} showLineNumbers
+import { first } from 'lodash'
+import { Command, CommandRunner, Option } from 'nest-commander'
+import { UserService } from 'src/modules/user/user.service'
+
+interface UserCommandOptions {
+  email?: string
+}
+
+@Command({ name: 'user', description: 'A parameter parse' })
+export class BasicCommand implements CommandRunner {
+  constructor(private readonly userService: UserService) {}
+
+  async run(passedParam: string[], options?: UserCommandOptions): Promise<void> {
+    if (options?.email) {
+      await this.findUserByEmail(passedParam) // await 꼭! 안하면 DB Pool 닫힘
+    } else {
+      await this.findUserById(passedParam)
+    }
+  }
+
+  @Option({
+    flags: '-e, --email',
+    description: 'Email를 통해 유저를 찾습니다.',
+  })
+  parseEmail(val: string): boolean {
+    return true
+  }
+
+  async findUserById(param: string[]) {
+    const id = Number(first(param))
+    const user = await this.userService.findOne({ id })
+    const { id: userId, name, email } = user
+    console.log({ userId, name, email })
+  }
+
+  async findUserByEmail(param: string[]) {
+    const email = first(param)
+    const user = await this.userService.findOne({ email })
+    const { id, name, email: userEmail } = user
+    console.log({ id, name, userEmail })
+  }
+}
+```
+
+결과는 다음과 같습니다.
+
+```bash
+$ npx ts-node -r tsconfig-paths/register src/script.ts user 5
+{ userId: 5, name: '홍길동', email: 'example@naver.com' }
+
+$ npx ts-node -r tsconfig-paths/register src/script.ts user example@naver.com -e
+{ id: 5, name: '홍길동', userEmail: 'example@naver.com' }
+```
+
+# 스크립트 길이 줄이기
+
+스크립트를 실행할 때 반복되는 명령어의 길이를 줄일 수 있습니다. 단순히 스크립트 파일을 추가해주면 됩니다. 루트 경로에 `script` 파일명으로 생성합니다.
+
+```bash:script
+npx ts-node -r tsconfig-paths/register src/script.ts $*
+```
+
+> $\* 는 셀스크립트 이후 args를 모두 가져와 실행시키는 역할을 합니다.
+
+그 후 해당 셸스크립트를 실행할 수 있게 사용권한을 수정합니다. `chmod 777 ./script`
+
+이제 이전의 명령어를 다음과 같이 줄일 수 있습니다!
+
+```bash
+# Before
+$ npx ts-node -r tsconfig-paths/register src/script.ts user 5
+
+# After
+$ ./script user 5
+```
+
+이런 방식으로 Service와 Repository를 엮어서 비즈니스 로직을 cli 방식으로 실행하는 법에 대해 알아보았습니다.
+
+# References
+
+- https://docs.nestjs.com/recipes/nest-commander
+- https://nest-commander.jaymcdoniel.dev/
+- https://www.npmjs.com/package/commander
