@@ -83,7 +83,7 @@ kube-scheduler는 어떤 파드가 어떤 노드로 결정하는 역할만 수�
 
 예를 들어보면, 아래 그림과 같이 10 CPU를 소모하는 파드가 있습니다.
 
-![](/static/images/blog/kubernetes-in-action-4/4.png)
+![](/static/images/blog/cka-udemy-1/1.png)
 
 4개의 노드는 각각 4, 4, 12, 16 CPU의 가용 용량이 있습니다.
 
@@ -115,6 +115,24 @@ kubelet이 수행하는 작업은 대표적으로 다음과 같습니다.
 kube-proxy는 각 워커노드에서 실행되는 프로세스입니다. 이는 새로운 서비스 리소스를 찾습니다.
 
 각 노드의 서비스 IP가 생길 때, 이를 kube-proxy에서 내부 IP 라우팅 테이블을 만들어 관리합니다. 즉 VPC 내부에서 라우팅 테이블을 통하여 다른 노드와 통신하는 것과 같습니다.
+
+# KodeKloud 실습
+
+Udemy의 CKA 강좌를 듣다보면 브라우저를 통해 쿠버네티스를 직접 컨트롤할 수 있는 실습환경을 구성하여 테스트를 볼 수 있습니다.
+
+[kodekloud](https://kodekloud.com/)에서 [CKA Labs](https://kodekloud.com/courses/labs-certified-kubernetes-administrator-with-practice-tests/)강좌에서 테스트할 수 있습니다.
+
+![](/static/images/blog/cka-udemy-1/2.png)
+
+pod test 중 대부분의 문제는 간단합니다. 지금까지 잘 따라왔다면 문제를 확인한 후 바로 풀 수 있습니다.
+
+한가지 흥미로웠던 부분은 쿠버네티스 명령어를 통해 yaml 초기 파일을 생성하는 점이었습니다.
+
+예를 들어 위 실습중 redis 이름을 가지고 redis123 이미지를 토대로 pod를 yaml을 토대로 만들라고 한 문제가 있었는데, yaml을 직접 타이핑하지 않고 다음과 같이 만듭니다.
+
+`$ k run redis --image=redis123 --dry-run=client -o yaml > pod.yaml`
+
+이렇게 하면 dry-run 옵션 때문에 실제로 파드가 생성되지는 않으며, 만약 이를 토대로 생성했을 때 만들어지는 yaml 형식이 pod.yaml에 저장됩니다.
 
 # References
 
