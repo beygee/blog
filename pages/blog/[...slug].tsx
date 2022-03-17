@@ -69,7 +69,7 @@ export default function Blog({
 
   return (
     <>
-      {'draft' in frontMatter && frontMatter.draft !== true ? (
+      {'draft' in frontMatter ? (
         <MDXLayoutRenderer
           layout={frontMatter.layout || DEFAULT_LAYOUT}
           toc={toc}
