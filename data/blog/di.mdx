@@ -1,0 +1,134 @@
+---
+title: 'DI 구현'
+date: '2022-03-22'
+tags: ['di']
+draft: true
+---
+
+# Overviews
+
+클래스간 결합도를 낮추기 위해 DI 패턴을 이용합니다.
+
+먼저 예를 들기 위해 게임 세계의 플레이어가 무기를 이용하는 클래스 구조를 만들어보겠습니다.
+
+```ts showLineNumbers
+interface Weapon {
+  use: () => void
+}
+
+class Sword implements Weapon {
+  use() {
+    console.log('SWORD!!')
+  }
+}
+
+class Player {
+  private readonly weapon: Weapon
+  constructor(weapon: Weapon) {
+    this.weapon = weapon
+  }
+
+  handle() {
+    this.weapon.use()
+  }
+}
+
+const player = new Player(new Sword())
+player.handle() // SWORD!!!
+```
+
+위의 예제를 보면 플레이어는 어떤 Weapon 타입의 무기를 소지할 수 있고, 이를 handle하여 이용할 수 있습니다. handle 안에 `weapon.use` 함수를 통해 무기를 어떤 방식으로 사용할 지는 Weapon의 책임에 전가합니다.
+
+게임을 만들다보면 플레이어는 다양한 형태로 전직할 수 있습니다. 만약 전사로 전직하면 검 형태의 무기만 사용할 수 있겠죠. 또 스나이퍼로 전직하면 총을 이용할 수 있을 겁니다 😀
+
+```ts showLineNumbers
+interface Weapon {
+  use: () => void
+}
+
+class Sword implements Weapon {
+  use() {
+    console.log('SWORD!!')
+  }
+}
+
+class Gun implements Weapon {
+  use() {
+    console.log('FIRE GUN!!')
+  }
+}
+
+class Player {
+  private readonly weapon: Weapon
+  constructor(weapon: Weapon) {
+    this.weapon = weapon
+  }
+
+  handle() {
+    this.weapon.use()
+  }
+}
+
+class Warrior extends Player {
+  constructor(sword: Sword) {
+    super(sword)
+  }
+}
+
+class Sniper extends Player {
+  constructor(gun: Gun) {
+    super(gun)
+  }
+}
+
+const warrior = new Warrior(new Sword())
+warrior.handle()
+
+const sniper = new Sniper(new Gun())
+sniper.handle()
+```
+
+위의 예제처럼 전사는 검을 소지하여 이용하고, 스나이퍼는 총을 소지하여 이용합니다. 의존성을 생성자에 주입함으로써 어떤 무기를 사용할지 결정합니다.
+
+여기에 IOC 컨테이너를 통해 싱글톤 형태로 생성자에 클래스를 자동주입할 수 있게 만들 수 있습니다.
+
+먼저 컨테이너를 구현해보겠습니다.
+
+```ts:container.ts showLineNumbers
+type ClassType = new () => {}
+class Container {
+  metadata: { [key: string]: ClassType } = {}
+}
+export const GlobalContainer = new Container()
+```
+
+Container는 metadata로 key:value 형태의 클래스 타입을 저장합니다.
+`GlobalContainer`를 하나 만들어 외부로 export 합니다.
+
+이후 `Injectable` 클래스 데코레이터를 만들어, 이를 사용한 클래스는 GlobalContainer metadata에 담아두도록 하겠습니다.
+
+```ts:decorator.ts showLineNumbers
+import { GlobalContainer } from './container'
+
+export function Injectable<T extends { new (...args: any[]): {} }>(constructor: T) {
+  GlobalContainer.metadata[constructor.name] = constructor
+}
+```
+
+이후에 Gun 클래스와 Sword 클래스 위에 Injectable 데코레이터를 선언해줍니다.
+
+```ts:index.ts {1,8} showLineNumbers
+@Injectable
+class Sword implements Weapon {
+  use() {
+    console.log('SWORD!!')
+  }
+}
+
+@Injectable
+class Gun implements Weapon {
+  use() {
+    console.log('FIRE GUN!!')
+  }
+}
+```
