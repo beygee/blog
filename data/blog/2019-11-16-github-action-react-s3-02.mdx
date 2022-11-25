@@ -1,0 +1,78 @@
+---
+title: '[Github Action] React Project 생성하기'
+date: '2019-11-16 02:00:00'
+tags: ['github actions', 'react', 's3']
+draft: false
+---
+
+![](https://velog.velcdn.com/post-images/loakick/9e868460-0816-11ea-96f1-e34b08653fe7/-2019-11-16-11.10.55.png)
+
+## 리액트 프로젝트 생성
+
+먼저 리액트 프로젝트를 생성해보겠습니다.
+
+```shell
+$ npm init react-app github-action-tutorial
+```
+
+> 🚧 만약 프로젝트가 생성되지 않은 사람들은 `npm i -g create-react-app`으로 패키지를 설치해주세요!
+
+그리고 github repository를 생성하여 소스코드를 올려줍니다.
+
+![스크린샷 2019-11-16 오전 11.30.00.png](https://images.velog.io/post-images/loakick/025bd9c0-0819-11ea-96f1-e34b08653fe7/-2019-11-16-11.30.00.png)
+
+![스크린샷 2019-11-16 오전 11.32.29.png](https://images.velog.io/post-images/loakick/6a5b3bb0-0819-11ea-b551-9530ce413927/-2019-11-16-11.32.29.png)
+
+레포를 생성하면 위와 같은 화면을 보실 수 있을겁니다. `create-react-app`으로 생성한 리액트 프로젝트 파일들을 해당 레포에 올려보도록 하겠습니다.
+
+## Github에 소스코드 올리기
+
+먼저 터미널에서
+
+```shell
+$ cd github-action-tutorial
+$ ls -al
+total 912
+drwxr-xr-x    10 bangu  staff     320 11 16 11:34 .
+drwxr-xr-x    29 bangu  staff     928 11 16 11:27 ..
+drwxr-xr-x     9 bangu  staff     288 11 16 11:34 .git
+-rw-r--r--     1 bangu  staff     310 11 16 11:28 .gitignore
+-rw-r--r--     1 bangu  staff    2884 11 16 11:28 README.md
+drwxr-xr-x  1020 bangu  staff   32640 11 16 11:28 node_modules
+-rw-r--r--     1 bangu  staff     630 11 16 11:28 package.json
+drwxr-xr-x     8 bangu  staff     256 11 16 11:28 public
+drwxr-xr-x     9 bangu  staff     288 11 16 11:28 src
+-rw-r--r--     1 bangu  staff  452518 11 16 11:28 yarn.lock
+```
+
+이와 같이 .git 파일이 이미 생성되어 있는 경우도 있습니다. `rm -rf .git` 명령어를 이용하여 해당 파일을 먼저 지우겠습니다.
+
+```shell
+$ rm -rf .git
+total 912
+drwxr-xr-x     9 bangu  staff     288 11 16 11:35 .
+drwxr-xr-x    29 bangu  staff     928 11 16 11:27 ..
+-rw-r--r--     1 bangu  staff     310 11 16 11:28 .gitignore
+-rw-r--r--     1 bangu  staff    2884 11 16 11:28 README.md
+drwxr-xr-x  1020 bangu  staff   32640 11 16 11:28 node_modules
+-rw-r--r--     1 bangu  staff     630 11 16 11:28 package.json
+drwxr-xr-x     8 bangu  staff     256 11 16 11:28 public
+drwxr-xr-x     9 bangu  staff     288 11 16 11:28 src
+-rw-r--r--     1 bangu  staff  452518 11 16 11:28 yarn.lock
+```
+
+지워졌나요 ?
+
+후에 다음과 같이 git 폴더를 생성 후, 프로젝트를 올려줍니다.
+
+```shell
+$ git init
+$ git add .
+$ git commit -m "init"
+$ git remote add origin git@github.com:beygee/github-action-tutorial.git # 자신의 레포로 변경해주세요.
+$ git push origin master
+```
+
+![스크린샷 2019-11-16 오전 11.31.24.png](https://images.velog.io/post-images/loakick/39622780-0819-11ea-af28-757ee35a4b49/-2019-11-16-11.31.24.png)
+
+위와 같이 소스코드가 정상적으로 업로드되었습니다.

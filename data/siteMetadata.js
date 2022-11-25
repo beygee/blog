@@ -2,7 +2,7 @@ const siteMetadata = {
   title: "Beygee's Blog",
   author: 'beygee',
   headerTitle: '베이지 블로그',
-  description: '개발하고 체득한 지식을 까먹지 않게 끄적여요',
+  description: '',
   language: 'ko-KR',
   siteUrl: 'https://blog-puce-psi.vercel.app',
   siteRepo: 'https://github.com/beygee/blog',

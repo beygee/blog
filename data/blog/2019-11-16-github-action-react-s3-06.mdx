@@ -1,0 +1,109 @@
+---
+title: '[Github Action] AWS S3에 React 프로젝트 배포하기'
+date: '2019-11-16 06:00:00'
+tags: ['github actions', 'react', 's3']
+draft: false
+---
+
+![](https://velog.velcdn.com/post-images/loakick/9e868460-0816-11ea-96f1-e34b08653fe7/-2019-11-16-11.10.55.png)
+
+Github Action 내부에서 이전 포스트에서 설정하여 만든 AWS 사용자 KEY(credentials.csv 다운 받으셨죠?)를 이용해야 합니다.
+
+## Github Action에 민감한 정보 저장하기
+
+AWS CLI KEY는 외부에 노출되어선 안된다고 했죠? 하지만 우리의 레포지토리는 공개 레포지토리이기 때문에, 업로드하는 파일은 세상 모두에게 알려지게 됩니다. 따라서 민감한 정보는 따로 암호화해서 저장할 수 있게 Github Action에서 방법을 제공합니다. 바로 `Secrets`을 통해서 말이죠.
+
+우리의 레포지토리에서 Actions 탭 말고 이번에는 Settings 탭으로 이동해보겠습니다.
+
+![스크린샷 2019-11-16 오후 4.59.59.png](https://images.velog.io/post-images/loakick/222e2090-0847-11ea-991a-cda7e3032f04/-2019-11-16-4.59.59.png)
+
+왼쪽에 보시면 Secrets 탭이 보이시죠? 해당 탭을 클릭합니다.
+
+Add a new secret 버튼을 눌러 우리의 `AWS_ACCESS_KEY_ID`와 `AWS_SECRET_ACCESS_KEY`를 설정해주겠습니다.
+
+> 🚧 `AWS_ACCESS_KEY_ID`와 `AWS_SECRET_ACCESS_KEY`의 이름은 반드시 맞춰서 적어주셔야 합니다. 해당 Name으로 process.env.AWS_ACCESS_KEY_ID와 같이 저장되기 때문에 후에 AWS CLI에서 편하게 명령어를 입력할 수 있습니다.
+
+![스크린샷 2019-11-16 오후 5.02.15.png](https://images.velog.io/post-images/loakick/8c78d210-0847-11ea-991a-cda7e3032f04/-2019-11-16-5.02.15.png)
+
+![스크린샷 2019-11-16 오후 5.02.56.png](https://images.velog.io/post-images/loakick/8ff2dda0-0847-11ea-991a-cda7e3032f04/-2019-11-16-5.02.56.png)
+
+두 개를 모두 작성하시면 다음과 같은 화면을 보실 수 있습니다.
+
+![스크린샷 2019-11-16 오후 5.04.45.png](https://images.velog.io/post-images/loakick/c76a63c0-0847-11ea-bf9d-db5436d09a81/-2019-11-16-5.04.45.png)
+
+자 이제 설정은 끝났습니다. 코드를 작성하러 가겠습니다.
+
+## Github Action 에서 S3 업로드 하기
+
+Secrets 정보를 불러와 코드를 작성해보겠습니다.
+
+```yml
+name: React build
+on:
+  push: # master Branch에서 push 이벤트가 일어났을 때만 실행
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout source code. # 레포지토리 체크아웃
+        uses: actions/checkout@master
+
+      - name: Cache node modules # node modules 캐싱
+        uses: actions/cache@v1
+        with:
+          path: node_modules
+          key: ${{ runner.OS }}-build-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.OS }}-build-
+            ${{ runner.OS }}-
+
+      - name: Install Dependencies # 의존 파일 설치
+        run: npm install
+
+      - name: Build # React Build
+        run: npm run build
+
+      - name: Deploy # S3에 배포하기
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 cp \
+            --recursive \
+            --region ap-northeast-2 \
+            build s3://github-action-tutorial # 자신의 레포지토리로 변경해주세요.
+```
+
+맨 하단에 Deploy `step`을 추가하였습니다.
+process.env 환경에 해당 정보를 주입합니다. secrets 객체 안에는 우리가 settings-secrets 탭에서 저장한 변수 값들이 있습니다.
+
+후에 run 방식으로 `aws s3 cp` 로 위 스텝에서 빌드한 `build` 폴더의 내용을 `s3://github-action-tutorial`에 복사하여 줍니다.
+
+❗ 버킷 이름은 자신의 버킷으로 변경해주세요.
+
+> aws 명령어를 사용할 수 있는 이유는 github action에서 가상환경 구축 시 자동으로 설치되어 있기 때문입니다. 설치되어 있는 소프트웨어는 [여기](https://help.github.com/en/actions/automating-your-workflow-with-github-actions/software-installed-on-github-hosted-runners#ubuntu-1804-lts)를 참고해주세요.
+
+## 배포 확인
+
+자 모든 설정이 끝났습니다. github에 위 소스코드를 올려주세요.
+
+![스크린샷 2019-11-16 오후 5.51.15.png](https://images.velog.io/post-images/loakick/44b33d10-084e-11ea-817d-bbc439a86dda/-2019-11-16-5.51.15.png)
+
+위와 같이 성공적으로 Deploy 되었다면 성공입니다!
+
+> ❗ 만약 Deploy 과정에서 ![](https://user-images.githubusercontent.com/43691105/69121452-c35f2a00-0adf-11ea-9867-03ff0df98e39.png)와 같이 실패하였다면 **(SignatureDoesNotMatch 에러)** > `AWS_SECRET_ACCESS_KEY: '${{ secrets.AWS_SECRET_ACCESS_KEY }}'`
+> 이런 형태로 따옴표로 감싸주면 문제가 해결된다고 합니다.
+> 도움주신 [@joeun_ha](https://velog.io/@joeun_ha)님 감사합니다. 😀
+
+S3 버킷 웹사이트 Url를 입력해서 들어가면 리액트 프로젝트가 보일 겁니다
+
+![스크린샷 2019-11-16 오후 5.51.58.png](https://images.velog.io/post-images/loakick/60d8be70-084e-11ea-803d-d37c7bc23ae5/-2019-11-16-5.51.58.png)
+
+앞으로 로컬에서 소스코드를 수정해서 master 브랜치에 소스를 push 하면, Github Action 에서 일련의 과정을 거친 뒤에 자동으로 S3에 배포할 것입니다.
+
+## 마무리
+
+이렇게 여러 서비스들을 혼용해서 우아하게 서비스를 배포하는 과정을 배워보았습니다. 다음 번에 기회가 되면 dev 브랜치를 나누어 pull request 할 때 코드 빌드, 테스트하고 master 브랜치에 머지할 때만 deploy 하는 법 등 여러가지 상황을 더 심화시켜 배워보도록 하겠습니다 ㅎㅎ

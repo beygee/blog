@@ -1,0 +1,158 @@
+---
+title: '[Github Action] React 빌드하기'
+date: '2019-11-16 04:00:00'
+tags: ['github actions', 'react', 's3']
+draft: false
+---
+
+![](https://velog.velcdn.com/post-images/loakick/9e868460-0816-11ea-96f1-e34b08653fe7/-2019-11-16-11.10.55.png)
+
+오늘은 React 프로젝트의 의존 파일(node_modules)들을 다운받아 build 하는 과정을 알아보겠습니다.
+
+## React Build
+
+React 프로젝트는 기본적으로 spa(single page application)이기 때문에, 한 페이지 내에 js 스크립트들을 불러와 화면을 구축하는 방식입니다. `npm run build`를 하면 정적 파일들로 구축을 해주기 때문에 `build` 폴더 안에 있는 index.html을 실행하면 우리의 홈페이지를 볼 수 있습니다.
+
+> 빌드 결과물
+
+```shell
+$ npm run build
+$ cd build
+$ ls -al
+total 168
+drwxr-xr-x  12 bangu  staff    384 11 16 14:52 .
+drwxr-xr-x  12 bangu  staff    384 11 16 14:52 ..
+-rw-r--r--   1 bangu  staff   1004 11 16 14:52 asset-manifest.json
+-rw-r--r--@  1 bangu  staff  22382 11 16 14:52 favicon.ico
+-rw-r--r--   1 bangu  staff   2250 11 16 14:52 index.html
+-rw-r--r--@  1 bangu  staff   8581 11 16 14:52 logo192.png
+-rw-r--r--@  1 bangu  staff  22920 11 16 14:52 logo512.png
+-rw-r--r--   1 bangu  staff    492 11 16 14:52 manifest.json
+-rw-r--r--   1 bangu  staff    646 11 16 14:52 precache-manifest.65cc23884dc36f175fe781f05ad70e2b.js
+-rw-r--r--   1 bangu  staff     57 11 16 14:52 robots.txt
+-rw-r--r--   1 bangu  staff   1183 11 16 14:52 service-worker.js
+drwxr-xr-x   5 bangu  staff    160 11 16 14:52 static
+```
+
+이 일련의 과정을 자동화시키고 `build` 폴더 안에 있는 파일들을 모두 S3에 올려 일찍 퇴근하는 것이 우리의 목적입니다. 🍺
+
+## Workflow 구성하기
+
+[이전 포스트](https://velog.io/@loakick/Github-Action-Github-Action-%EC%84%A4%EC%A0%95%ED%95%98%EA%B8%B0)에서 작성한 main.yml을 모두 지우고 다시 새로 작성해보겠습니다.
+
+```yml
+name: React build
+on:
+  push: # master Branch에서 push 이벤트가 일어났을 때만 실행
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout source code. # 레포지토리 체크아웃
+        uses: actions/checkout@master
+
+      - name: Install Dependencies # 의존 파일 설치
+        run: npm install
+
+      - name: Build # React Build
+        run: npm run build
+```
+
+`Checkout source code`는 이전처럼 레포지토리 파일을 받아오는 것입니다. 그 후에, node_modules 의존 모듈을 받아오기 위해 `npm install`을 하고, `npm run build`로 빌드하여 정적 파일들을 생성합니다.
+
+이제 Github에 올려 확인해보겠습니다.
+
+```shell
+$ git add .github/workflows/main.yml
+$ git commit -m "workflow: build react project"
+$ git push origin master
+```
+
+그리고 다시 actions 탭에 들어가 빌드 과정을 확인해보겠습니다.
+
+![스크린샷 2019-11-16 오후 3.02.20.png](https://images.velog.io/post-images/loakick/c87af920-0836-11ea-9239-eb210debaad1/-2019-11-16-3.02.20.png)
+
+실시간으로 빌드하는 과정을 살펴볼 수 있습니다. 해당 `Step`들을 클릭하면 상세 로깅도 볼 수 있습니다.
+install dependencies하는데 무려 37초나 걸렸네요.
+
+앞으로 매번 빌드할 때마다 1분가량 걸리면 기다리는데도 지치겠죠? 그래서 Github Action 에서는 파일을 Caching하는 방법이 존재합니다. 폴더마다 약 400MB까지 캐싱할 수 있다고 하니 node_modules 폴더를 캐싱하는데는 충분할 것 같습니다.
+
+## 폴더 캐싱하기
+
+Github Action에서 캐싱을 해보겠습니다.
+
+```yml
+name: React build
+on:
+  push: # master Branch에서 push 이벤트가 일어났을 때만 실행
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout source code. # 레포지토리 체크아웃
+        uses: actions/checkout@master
+
+      - name: Cache node modules # node modules 캐싱
+        uses: actions/cache@v1
+        with:
+          path: node_modules
+          key: ${{ runner.OS }}-build-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.OS }}-build-
+            ${{ runner.OS }}-
+
+      - name: Install Dependencies # 의존 파일 설치
+        run: npm install
+
+      - name: Build # React Build
+        run: npm run build
+```
+
+위와 같이 node modules를 캐싱하는 `step`을 추가합니다.
+
+이는 [actions/cache](https://github.com/actions/cache) 액션을 가져와 실행합니다. with 구문으로 설정할 수 있는데, `path`와 `key`를 반드시 설정해주어야 합니다.
+
+- path: 저장하고 불러올 캐시 대상 폴더
+- key: 저장 하고 불러올 때 식별할 수 있는 키 값
+- restore-keys(optional): 캐시 key가 일치하는 것이 없을때, 차선택으로 캐싱 폴더를 찾는 key
+
+알고리즘은 다음과 같습니다.
+
+1. 이미 캐싱이 된 key 값이 존재하면 해당 폴더를 path 폴더에 불러옵니다.
+2. 만약 캐싱이 된 key가 없다면 다음과 같은 작업을 수행합니다.
+   1. restore-keys가 존재하면 순서대로 restore-key와 `match`되는 key 값을 찾습니다.
+   2. 일치하는 key값이 있다면 path 폴더에 불러옵니다.
+   3. 만약 여기서도 일치하는 key가 없다면 종료하고 다음 단계를 수행합니다.
+3. 해당 job을 성공적으로 마치면, path 폴더에 key 값을 부여하고 캐싱 후 저장합니다.
+
+위 코드를 예시로 설명해보겠습니다.
+
+- `path: node_modules`: node_modules 폴더를 캐싱합니다.
+- `key: ${{ runner.OS }}-build-${{ hashFiles('**/package-lock.json') }}`: `runner.OS`는 가상환경을 의미하며 여기서는 "Linux"를 의미합니다. `hashFiles('**/package-lock.json')`는 package-lock.json 파일을 해시화한다는 것인데, 이는 같은 의존성 파일이면 같은 해시값이 나오게 되어 새로운 key를 만들지 않습니다. 하지만 새로운 모듈이 추가되면 lock 파일도 변경이 일어나고, 이어서 해시값도 바뀌므로 key도 변경이 되어 새롭게 캐싱을 하게 되는 것입니다.
+- `restore-keys: | ${{ runner.OS }}-build- ${{ runner.OS }}-`: 만약 key값이 없으면 그 이전에 캐시했던 폴더중 가장 최근의 key값을 가져와 불러옵니다.
+
+🐯 얘기가 길어져서 어려운데 결국 요약하면 **node_modules을 저장했다 불러온다**는 것입니다.
+
+자 이렇게 코드를 저장하고 소스코드를 github에 두번 올려보겠습니다. (첫번째는 캐시해서 저장하고, 두번째는 캐싱된 폴더를 불러오기 위해!)
+
+> git 에 올리는 shell script는 생략하도록 하겠습니다. (이전 포스트에 있습니다!)
+
+> ❗만약 package-lock.json을 찾을수 없다고 오류가 뜬다면, 현재 레포지토리에 package-lock.json이 없는 것이므로, 우리 로컬 프로젝트에서 한번 `npm install`해서 package-lock.json을 생성한 후 소스를 `push`해 줍시다.
+
+![스크린샷 2019-11-16 오후 4.10.37.png](https://images.velog.io/post-images/loakick/35b4ec40-0840-11ea-871c-0328e16308d1/-2019-11-16-4.10.37.png)
+
+처음 빌드에는 Cache not found for input keys라고 뜨네요. 그리고 Install Dependencies Step에서 41초가 걸렸습니다.
+
+![스크린샷 2019-11-16 오후 4.16.14.png](https://images.velog.io/post-images/loakick/0df9c2b0-0841-11ea-8ed2-15e8a1a9d977/-2019-11-16-4.16.14.png)
+
+다음 빌드에서는 Cache를 찾아 Restore했다고 뜨지요? 그 후에 의존 파일 설치는 14초로 줄었습니다. 2배보다 빠른 속도입니다!
+
+앞으로 프로젝트에 의존 패키지를 더 설치하면 설치할 수록 캐싱을 한 것은 더 빛을 발할 것입니다. 이로 인해 빌드하는 속도를 비약적으로 단축시켰습니다.
+
+다음 포스트에서는 AWS S3 정적사이트 설정하는 방법을 배워보도록 하겠습니다.

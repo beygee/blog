@@ -1,0 +1,166 @@
+---
+title: 'Ant Design Docs for Alfred Workflow'
+date: '2021-08-07'
+tags: ['ant design', 'alfred', 'automation']
+draft: false
+---
+
+![](<https://velog.velcdn.com/images/loakick/post/aba6bf4a-787c-4b07-9c2c-540945a35a36/128593686-274cd835-227c-4b5c-9675-09ef5d6d5db3%20(1).gif>)
+
+## Overview
+
+현재 솔리다리테 프론트엔드에는 Ant Design UI, tailwindcss 등을 활용하여 개발중입니다. 공식 Docs에서 권장하는 방식으로 개발하기 위해 자주 문서를 확인하는 편입니다.
+
+하지만 매 번 확인할 때마다 크롬을 키고, 독스 페이지에 들어가 확인하려는 세부 페이지까지 들어가기란 매우 피곤한 일입니다
+
+이 시간을 어떻게 더 줄여서 시급을 높일 수 있을까요?
+
+## Alfred Workflow
+
+알프레드 워크플로우는 반복되는 작업을 스크립트를 이용하여 아주 짧게 줄여주는 훌륭한 도구입니다.
+
+![](https://miro.medium.com/max/1412/1*ytwhZyj5aEmQK2-iuhzbfA.png)
+이모지 검색하는 워크플로우: 검색해서 바로 클립보드에 복사합니다.
+![](https://miro.medium.com/max/1254/1*RfzGWlp5bvApDwMxFEzTMQ.png)
+
+구글 번역도 바로 할 수 있죠. 커밋 메시지 영어로 변환할 때 좋답니다. 이런식으로 명령어만 쳐서 보고싶은 컴포넌트를 검색한 후 엔터만 누르면 바로 독스페이지가 뜨면 어떨까요?
+
+![](https://miro.medium.com/max/1400/1*mPcWJ0ziOMyacNRLbWk3Rw.gif)
+
+그래서 알프레드 워크플로우를 직접 만들기 위해선 어떻게 해야하는지 살펴보았습니다.
+
+## 워크플로우 생성
+
+알프레드 워크플로우는 다양한 방식으로 만들 수 있습니다. 먼저 기본적으로 알프레드에서 공식 제공하는 GUI 툴로 워크플로우를 구성할 수 있습니다!
+
+![](https://miro.medium.com/max/1400/1*Pe21u5QTWTT88rQ8A9NaSA.png)
+
+또한 스크립트 형태로도 제작이 가능한데, 써드파티 라이브러리를 활용하여 다양한 언어로 알프레드 워크플로우를 만들 수 있습니다.
+
+저는 Javascript를 애용하기 때문에, [alfy](https://github.com/sindresorhus/alfy) 라이브러리를 이용해 제작하기로 했습니다.
+
+> 실행 환경을 구축하는 법은 ALFY README에 잘 나와있습니다!
+
+## Search Ant Design Docs For Alfred 코드 작성
+
+Ant Design 독스 문서에서는 검색 엔진 Algolia를 제공하여 문서를 찾아볼 수 있게 해주고 있습니다.
+
+![](https://miro.medium.com/max/1400/1*8-MPkjSl0obqSnBEFm_2kg.png)
+
+따라서 저희 워크플로우에서도 이 검색엔진을 이용하여 똑같이 결과물을 받아보도록 할 예정입니다.
+
+```typescript
+import algoliasearch from 'algoliasearch'
+
+const client = algoliasearch('BH4D9OD16A', '60ac2c1a7d26ab713757e4a081e133d0')
+const index = client.initIndex('ant_design')
+
+interface AlgoliaHitObject {
+  anchor: string
+  url: string
+  hierarchy: AlgoliaHitObjectHierarchy
+}
+
+interface AlgoliaHitObjectHierarchy {
+  lvl0: string | null
+  lvl1: string | null
+  lvl2: string | null
+  lvl3: string | null
+  lvl4: string | null
+  lvl5: string | null
+  lvl6: string | null
+}
+
+const fetchDocs = async (searchText: string) => {
+  const { hits } = await index.search<AlgoliaHitObject>(searchText, {
+    hitsPerPage: 20,
+    facetFilters: ['tags:en'],
+  })
+
+  const filteredHits = hits.filter((hit) => hit.anchor === 'header')
+
+  return filteredHits
+}
+
+const start = async () => {
+  const searchText = 'input'
+  const items = await fetchDocs(searchText)
+  console.log(items)
+}
+
+start()
+```
+
+해당 코드는 위 이미지에서 input을 검색해서 받아온 결과와 똑같습니다.
+
+![](https://miro.medium.com/max/900/1*MrQQL7KmxjNgzn-4ZF7B7A.png)
+
+그럼 이제 alfy와 엮어서 코드를 작성해보겠습니다.
+
+```typescript
+import algoliasearch from 'algoliasearch'
+import alfy, { ScriptFilterItem } from 'alfy'
+
+const client = algoliasearch('BH4D9OD16A', '60ac2c1a7d26ab713757e4a081e133d0')
+const index = client.initIndex('ant_design')
+
+interface AlgoliaHitObject {
+  anchor: string
+  url: string
+  hierarchy: AlgoliaHitObjectHierarchy
+}
+
+interface AlgoliaHitObjectHierarchy {
+  lvl0: string | null
+  lvl1: string | null
+  lvl2: string | null
+  lvl3: string | null
+  lvl4: string | null
+  lvl5: string | null
+  lvl6: string | null
+}
+
+const fetchWithCache = async (searchText: string) => {
+  const cachedItems = alfy.cache.get<string, ScriptFilterItem[]>(searchText)
+  if (cachedItems) return cachedItems
+
+  const { hits } = await index.search<AlgoliaHitObject>(searchText, {
+    hitsPerPage: 20,
+    facetFilters: ['tags:en'],
+  })
+
+  const filteredHits = hits.filter((hit) => hit.anchor === 'header')
+
+  const items = filteredHits.map<ScriptFilterItem>((hit) => ({
+    title: hit.hierarchy.lvl1 ?? '',
+    subtitle: hit.hierarchy.lvl0 ?? '',
+    arg: hit.url,
+  }))
+
+  alfy.cache.set(searchText, items, { maxAge: 1000 * 60 * 60 })
+
+  return items
+}
+
+const start = async () => {
+  const searchText = alfy.input
+  const items = await fetchWithCache(searchText)
+  alfy.output(items)
+}
+
+start()
+```
+
+이 코드를 워크플로우로 배포하면, 다음과 같은 결과를 얻을 수 있습니다.
+
+![](https://miro.medium.com/max/1400/1*mPcWJ0ziOMyacNRLbWk3Rw.gif)
+
+## Conclusion
+
+이런 방식으로 평소에 일하면서 반복되는 작업들을 알프레드 워크플로우를 작성하여 빼낼 수 있다면 업무 효율이 많이 올라갑니다.
+
+에어팟 자동 연결 단축키, 프로세스 죽이기 , 깃허브 레포 검색 등등 다른 분들이 앞서 만든 워크플로우를 잘 쓰고 있습니다 :)
+
+저도 다른 분들이 만든 것만 쓰다가 직접 만들어본 건 처음입니다. 꽤나 잘 지원하는 라이브러리 덕에 쉽게 만들 수 있다는 걸 알았네요. 여러분도 지겹게 반복하고 손이 많이가는 작업들을 워크플로우를 이용해서 삶의 질을 높여보세요.
+
+[Search Ant Design Docs For Alfred](https://github.com/beygee/alfred-ant-design-docs) 👈👈 워크플로우를 이용해보세요!

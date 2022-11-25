@@ -1,0 +1,35 @@
+---
+title: 'Github Action을 이용해서 React 프로젝트 S3에 배포하기'
+date: '2019-11-16 01:00:00'
+tags: ['github actions', 'react', 's3']
+draft: false
+---
+
+![](https://velog.velcdn.com/post-images/loakick/9e868460-0816-11ea-96f1-e34b08653fe7/-2019-11-16-11.10.55.png)
+
+## Github Action
+
+Action은 기존에 있는 서비스 Circle CI, Travis CI, Jenkins와 같은 빌드/배포 자동화 서비스입니다. 기존 서비스에 비해 매력적인 부분은, Github 내에서 소스 코드 관리부터 배포 자동화까지 한번에 처리할 수 있다는 점입니다.
+
+[Github Action](https://github.com/features/actions)은 원래 베타 버전이었는데, 2019년 11월 15일 GA가 되었습니다 😆
+
+CI/CD툴을 처음 이용하기 때문에 서툴러서, 정리하기위해 포스팅으로 남기며 살펴볼 예정입니다.
+
+## 무엇을 배울 것인가
+
+포스트를 진행하면서 React 프로젝트를 생성하고, Github Action을 통하여 Git에 소스 `push`를 하면 AWS S3에 자동 배포하는 과정을 배워볼 것입니다.
+
+우선 사용할 기술은 다음과 같습니다.
+
+- React (create-react-app)
+- Github Actions
+- AWS S3
+
+그리고 살펴볼 내용은 다음과 같습니다.
+
+- 간단한 React 프로젝트 생성 방법
+- Github Actions 기본 구성, 빌드하는 과정
+- AWS S3 버킷 정적 사이트 설정
+- AWS CLI를 이용하여 S3에 정적 사이트 배포하기
+
+그럼 다음 포스트에서는 간단한 React 프로젝트를 생성해보도록 하겠습니다 🌈
