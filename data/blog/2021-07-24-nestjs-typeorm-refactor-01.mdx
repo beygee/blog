@@ -1,0 +1,103 @@
+---
+title: 'Nest.js TypeORM 리팩터링 (DDD Aggregate)'
+date: '2021-07-24'
+tags: ['nest.js', 'typeorm', 'refactoring', 'ddd']
+draft: false
+---
+
+![](https://velog.velcdn.com/images/loakick/post/404e5730-0cc7-46be-9851-e6649a487a30/Nestjs.png)
+
+## Overview
+
+회사에서 백엔드에서 Nest.js와 TypeORM를 애용하는 편입니다. 두 라이브러리 모두 독스의 완성도가 훌륭한 편입니다. 하지만 실무에 적용하면서 여러 난관에 부딪히게 되더군요. 😃 `Repository`와 `Service`의 경계를 분리를 하고, 리팩터링하여 재사용성을 높였던 방법을 공유하고자 합니다.
+
+## Aggregate (집합체)
+
+Aggregate는 데이터 변경의 단위로 다루는 연관 객체의 묶음이라고 합니다. 일반적으로 우리가 생각하는 비즈니스 도메인의 단위가 됩니다.
+
+예를 들어, User 객체와, UserAuth (유저 권한), UserProfile (유저 프로필)객체를 통틀어 하나의 Aggregate라고 할 수 있습니다.
+
+![](https://miro.medium.com/max/796/1*Mj9nnEyxifzPlaSYHFwkNA.png)
+
+UserAuth와 UserProfile은 User에 종속적이기 때문에 UserAuth나 UserProfile은 따로 삭제되어서는 안됩니다.
+
+하지만 Nest.js와 TypeORM을 연결해 쓰다보면 Service에서 각각 엔티티 Repo에 접근할 수 있기 때문에, 다음과 같이 UserAuth만 지워질 위험이 있습니다.
+
+```typescript
+@Injectable()
+export class UserService {
+  constructor(
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(UserAuth)
+    private readonly userAuthRepository: Repository<UserAuth>,
+    @InjectRepository(UserProfile)
+    private readonly userProfileRepository: Repository<UserProfile>
+  ) {}
+
+  public async deleteUserAuth(userAuthId: number) {
+    await this.userAuthRepository.delete(userAuthId)
+  }
+}
+```
+
+따라서 Aggregate당 하나의 Repository를 만들어 진입점을 한 곳으로 모아 관리를 하는 경우가 일반적입니다. 위와 같은 경우에서는 UserRepository 커스텀 클래스를 만들어 객체 접근에 관한 설계를 결정합니다.
+
+```typescript
+import { AbstractRepository, EntityRepository } from 'typeorm'
+import { User } from './user.entity'
+
+export interface UserFindOneOptions {
+  id?: number
+}
+
+@EntityRepository(User)
+export class UserRepository extends AbstractRepository<User> {
+  // userAuth, userProfile 조회를 막고, user를 통해서만 조회 가능하도록 합니다.
+  public async findOne({ id }: UserFindOneOptions = {}) {
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    if (id) qb.andWhere('User.id = :id', { id })
+
+    return qb.getOne()
+  }
+
+  public async delete(userId: number) {
+    return this.repository.delete(userId)
+  }
+}
+```
+
+UserRepository를 커스텀하여 의도치않은 접근을 모두 막았습니다. 이제 userService 에서 각각의 Entity에 따로 Repo를 접근하지 않고 Root 객체인 User에만 접근하여 나머지 하위 객체를 조회할 수 있습니다.
+
+```typescript
+import { Injectable } from '@nestjs/common'
+import { UserRepository } from './user.repository'
+
+@Injectable()
+export class UserService {
+  constructor(private readonly userRepository: UserRepository) {}
+
+  public async findByUserId(userId: number) {
+    const user = await this.userRepository.findOne({ id: userId })
+    // user.userAuth or user.userProfile 접근 가능!
+    return user
+  }
+
+  public async delete(userId: number) {
+    // DB Cascade를 걸어주어 userAuth와 userProfile까지 삭제되게 한다.
+    return this.userRepository.delete(userId)
+  }
+}
+```
+
+커스텀 Repository를 만들어 다음과 같은 효용을 누릴 수 있었습니다.
+
+- Aggregate의 경계와 Repository의 역할 범위를 일치시킴
+- Repository의 개수를 줄임
+- 불필요한 또는 위험한 접근을 차단
+
+다음 포스트에서는 TypeORM 쿼리 빌더의 재사용성을 높이는 방법에 대해 알아보겠습니다.

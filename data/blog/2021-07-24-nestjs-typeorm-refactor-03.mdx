@@ -1,0 +1,181 @@
+---
+title: 'Nest.js TypeORM 리팩터링 (SingleTableInheritance)'
+date: '2021-07-24'
+tags: ['nest.js', 'typeorm', 'refactoring', 'ddd']
+draft: false
+---
+
+![](https://velog.velcdn.com/images/loakick/post/404e5730-0cc7-46be-9851-e6649a487a30/Nestjs.png)
+
+## Overview
+
+이전에 TypeORM에서 자주 이용하는 QueryBuilder를 리팩터링하는 법을 배웠습니다.
+
+이번에는 TypeORM에서 단일 테이블 상속 패턴을 이용하는 법을 살펴보겠습니다.
+
+객체지향 프로그래밍에서 객체의 책임을 적절하게 분배하기 위해서 상속, 합성, 다형성 다양한 기법을 이용합니다. 하지만 이 상속받은 객체 구조를 어떻게 DB에 저장하여 영속성을 보장할 수 있을까요?
+
+통상적으로 사용하는 MySQL 같은 관계형 DB는 상속을 지원하지 않습니다. 따라서 테이블에 대응되는 Entity, 즉 객체를 관계형 DB에 어떤식으로 매핑해야할 지를 고려해야 합니다.
+
+그 중 하나가 단일 테이블 상속 패턴인데, 상속 구조의 모든 클래스들의 필드를 단일 테이블 컬럼에 매핑하는 방법입니다.
+
+![](https://miro.medium.com/max/1210/1*sG_aC5wB85eGrgmAuKiGPQ.png)
+
+> 좌측이 객체 구조, 우측이 매핑되는 테이블 “Patterns of Enterprise Application Architecture” By Martinfowler
+
+---
+
+## TypeORM Single Table Pattern
+
+TypeORM에서는 `@TableInheritance` 와 `@ChildEntity` 데코레이터로 싱글 테이블 패턴을 구현할 수 있습니다. 위 이미지 처럼 `Player`를 예시로 코드를 구현해보겠습니다.
+
+```typescript
+// player.entity.ts
+import { Column, Entity, PrimaryGeneratedColumn, TableInheritance, ChildEntity } from 'typeorm'
+
+export enum PlayerType {
+  FOOTBALL = 'FOOTBALL',
+  CRICKET = 'CRICKET',
+}
+
+@Entity({ name: 'Player' })
+@TableInheritance({ column: { type: 'enum', enum: PlayerType, name: 'type' } })
+export class Player {
+  @PrimaryGeneratedColumn()
+  id: number
+
+  @Column()
+  name: string
+
+  @Column({ enum: PlayerType, type: 'enum' })
+  type: PlayerType
+
+  public play() {
+    console.log(`Player [${this.name}]: Play!!`)
+  }
+}
+
+@ChildEntity(PlayerType.FOOTBALL)
+export class Footballer extends Player {
+  @PrimaryGeneratedColumn()
+  id: number
+
+  @Column()
+  club: string
+
+  // 오버라이딩
+  public play() {
+    console.log(`Footballer [${this.name}]: Play!!`)
+  }
+}
+
+@ChildEntity(PlayerType.CRICKET)
+export class Cricketer extends Player {
+  @PrimaryGeneratedColumn()
+  id: number
+
+  @Column()
+  batting: string
+
+  // 오버라이딩
+  public play() {
+    console.log(`Cricketer [${this.name}]: Play!!`)
+  }
+}
+```
+
+부모 클래스 `Player`에서 `@TableInheritance` 데코레이터에서 `type` 컬럼을 가지고 자식클래스를 분류하겠다고 정의할 수 있습니다.
+
+![](https://miro.medium.com/max/596/1*5bb6py71-jfRHFWuYGLL0w.png)
+
+위 코드를 토대로 마이그레이션을 통하여 생성된 테이블 스키마입니다.
+
+우리가 확인해야 할 점은 다음과 같습니다.
+
+1. PlayerRepository로 이 Player들을 불러오면 각각 타입에 맞는 자식클래스로 매핑이 되는가?
+
+2. 각각의 자식클래스에서 play 함수를 호출하면 다형성이 적용되어 오버라이딩된 함수가 실행되는가?
+
+이 가설들을 테스트해보기 위해 먼저 간단한 더미 데이터를 넣어보겠습니다.
+
+![](https://miro.medium.com/max/552/1*uskSeSKEJttbJZz-3CGVxw.png)
+
+### 타입에 맞는 자식클래스로 매핑이 되는가?
+
+`PlayerService`를 만들어 로그를 찍어 확인해보도록 하겠습니다.
+
+```typescript
+// player.service.ts
+import { Injectable } from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { Repository } from 'typeorm'
+import { Player } from './player.entity'
+
+@Injectable()
+export class PlayerService {
+  constructor(
+    @InjectRepository(Player)
+    private readonly playerRepository: Repository<Player>
+  ) {}
+
+  public async findPlayers() {
+    const players = await this.playerRepository.find()
+
+    console.log(players)
+
+    return players
+  }
+}
+```
+
+결과는 다음과 같습니다.
+
+![](https://miro.medium.com/max/566/1*8voqpZuZ4KUYP_iSEcqNRQ.png)
+
+> 타입에 맞는 자식클래스로 매핑되어 내려옵니다!
+
+부모클래스인 PlayerRepository에서 자식클래스로 자동으로 매핑되어 내려오는 것을 확인할 수 있습니다.
+
+### 다형성이 적용되어 오버라이딩 된 함수가 실행되는가?
+
+이번에도 PlayerService에서 로그를 찍어 확인해보겠습니다.
+
+```typescript
+// player.service.ts
+import { Injectable } from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { Repository } from 'typeorm'
+import { Player } from './player.entity'
+
+@Injectable()
+export class PlayerService {
+  constructor(
+    @InjectRepository(Player)
+    private readonly playerRepository: Repository<Player>
+  ) {}
+
+  public async findPlayers() {
+    const players = await this.playerRepository.find()
+
+    players.forEach((player) => player.play())
+
+    return players
+  }
+}
+```
+
+결과는 다음과 같습니다.
+
+![](https://miro.medium.com/max/682/1*ZXef_uwHwquRmG9cwXVNHQ.png)
+
+이 역시도 자식클래스에서 정의한 play 함수로 오버라이딩되어 실행되는 것을 확인할 수 있습니다.
+
+## 마무리
+
+이로써 데이터의 영속성을 보장한 채로 객체지향의 다양한 기능을 활용할 수 있게 되었습니다. 인프라에 구애받지 않고 코드의 품질을 끌어올려주는 TypeORM의 기능에 다시 한 번 놀랐습니다.
+
+Nest.js + TypeORM 리팩터링 시리즈는 이렇게 3편으로 마무리 되었습니다. 쓰고나니 Nest.js에 대한 내용은 거의 없고 TypeORM 리팩터링만 한 것 같아서 머쓱하긴 하네요😅
+
+혹시나 피드백이나 더 좋은 개선 사항 공유는 언제나 환영입니다!
+
+다음 포스팅은 앱이나, 프론트 구조, 혹은 인프라쪽 관련 내용으로 다시 찾아뵙겠습니다.

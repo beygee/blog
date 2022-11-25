@@ -1,0 +1,660 @@
+---
+title: 'Nest.js TypeORM 리팩터링 (QueryBuilder)'
+date: '2021-07-24'
+tags: ['nest.js', 'typeorm', 'refactoring', 'ddd']
+draft: false
+---
+
+![](https://velog.velcdn.com/images/loakick/post/404e5730-0cc7-46be-9851-e6649a487a30/Nestjs.png)
+
+지난번에는 TypeORM Repository를 DDD하게 도메인 Aggregate 범위와 일치시키는 법에 살펴보았습니다.
+
+이번에는 `TypeORM`에서 자주 이용하는 `QueryBuilder`의 코드량을 줄이는 법에 대해 살펴보도록 하겠습니다.
+
+> 🚧 이번 포스트는 코드가 굉장히 많습니다! 여유로운 마음을 가지고 봐주세요.
+
+## QueryBuilder 재사용성 높이기
+
+서비스를 만들면서 조회가 필요한 쿼리는 모두 `TypeORM`의 `QueryBuilder` 패턴을 이용하여 만들고 있습니다. `QueryBuilder`가 `TypeORM`의 `findOne`과 같은 함수보다 더 세밀하게`(조인된 테이블 where, order, having, group등)` 쿼리를 조정할 수 있기 때문입니다.
+
+```typescript
+// user.service.ts
+import { Injectable } from '@nestjs/common'
+import { UserRepository } from './user.repository'
+
+@Injectable()
+export class UserService {
+  constructor(private readonly userRepository: UserRepository) {}
+
+  public async findOneByUserId(userId: number) {
+    return this.userRepository.findOneByUserId(userId)
+  }
+
+  public async findOneByEmail(email: string) {
+    return this.userRepository.findOneByEmail(email)
+  }
+
+  public async findOneByNickname(nickname: string) {
+    return this.userRepository.findOneByNickname(nickname)
+  }
+}
+```
+
+```typescript
+// user.repository.ts
+import { AbstractRepository, EntityRepository } from 'typeorm'
+import { User } from './user.entity'
+
+@EntityRepository(User)
+export class UserRepository extends AbstractRepository<User> {
+  public async findOneByUserId(userId: number) {
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    qb.andWhere('User.id = :id', { id: userId })
+
+    return qb.getOne()
+  }
+
+  public async findOneByEmail(email: string) {
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    qb.andWhere('User.email = :email', { email })
+
+    return qb.getOne()
+  }
+
+  public async findOneByNickname(nickname: string) {
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    qb.andWhere('User.nickname = :nickname', { nickname })
+
+    return qb.getOne()
+  }
+}
+```
+
+하지만 비즈니스 조회 로직이 많아질 수록, `QueryBuilder` 함수를 반복해서 사용하는 경우가 많아졌습니다. 문제는 크게 3가지 경우였습니다.
+
+- 너무 많이 반복.. 또 반복
+- Or 연산은 어떻게 하지?
+- FindOperator로 연산자 범위 넓히기
+
+## 너무 많이 반복.. 또 반복
+
+위의 예제와 같이 `Service`에서 조회의 단위가 많아질 때마다 `Repository`에도 같이 늘어나는 문제가 있습니다. 이는 다음과 같이 `Repository`의 조회 메소드를 묶어주어 해결할 수 있습니다.
+
+```typescript
+// user.service.ts
+import { Injectable } from '@nestjs/common'
+import { UserRepository } from './user.repository'
+
+@Injectable()
+export class UserService {
+  constructor(private readonly userRepository: UserRepository) {}
+
+  public async findOneByUserId(userId: number) {
+    return this.userRepository.findOne({ id: userId })
+  }
+
+  public async findOneByEmail(email: string) {
+    return this.userRepository.findOne({ email })
+  }
+
+  public async findOneByNickname(nickname: string) {
+    return this.userRepository.findOne({ nickname })
+  }
+}
+```
+
+```typescript
+// user.repository.ts
+import { AbstractRepository, EntityRepository } from 'typeorm'
+import { User } from './user.entity'
+
+export interface UserFindOneOptions {
+  id?: number
+  email?: string
+  nickname?: string
+}
+
+@EntityRepository(User)
+export class UserRepository extends AbstractRepository<User> {
+  public async findOne({ id, email, nickname }: UserFindOneOptions = {}) {
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    if (id) qb.andWhere('User.id = :id', { id })
+    if (email) qb.andWhere('User.email = :email', { email })
+    if (nickname) qb.andWhere('User.nickname = :nickname', { nickname })
+
+    return qb.getOne()
+  }
+}
+```
+
+여기서 주의해야할 것이 있습니다. `Service`에서 `this.userRepository.findOne()` 와 같이 파라미터를 넘기지 않고 호출하면, 해당 테이블에 존재하는 가장 첫번째 객체가 가져와집니다. Query로 변환하면 `SELECT * FROM USER LIMIT 1` 하는 것과 마찬가지니까요! 따라서 빈 파라미터를 넘길 경우, `null`값을 반환하는 예외처리가 필요합니다.
+
+```typescript
+// user.repository.ts
+import { pickBy, isNil, negate } from 'lodash'
+
+// 객체의 null, undefined 값인 키들을 지워줍니다.
+// 자세한 원리는 lodash를 참고하세요.
+export const removeNilFromObject = (object: object) => {
+  return pickBy(object, negate(isNil))
+}
+
+@EntityRepository(User)
+export class UserRepository extends AbstractRepository<User> {
+  public async findOne(options: UserFindOneOptions = {}) {
+    // 빈 객체일 경우 null을 반환합니다.
+    if (Object.keys(removeNilFromObject(options)).length === 0) return null
+    const { id, email, nickname } = options
+
+    // ...
+
+    return qb.getOne()
+  }
+}
+```
+
+## Or 연산은 어떻게 하지?
+
+같은 방법으로 만든 `findAll` 함수를 보겠습니다.
+
+```typescript
+// user.repository.ts
+import { AbstractRepository, EntityRepository } from 'typeorm'
+import { User } from './user.entity'
+
+export interface UserFindAllWhereOptions {
+  id?: number
+  email?: string
+  nickname?: string
+}
+
+export interface UserFindAllOptions {
+  where?: UserFindAllWhereOptions
+  skip?: number
+  take?: number
+}
+
+@EntityRepository(User)
+export class UserRepository extends AbstractRepository<User> {
+  // ...
+
+  // 한번에 많은 데이터를 가져오는 것을 방지하기 위해 skip, take로 페이지네이팅 합니다.
+  public async findAll(options: UserFindAllOptions = {}) {
+    const { where, skip, take } = options
+
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    if (where) {
+      const { id, email, nickname } = where
+      if (id) qb.andWhere('User.id = :id', { id })
+      if (email) qb.andWhere('User.email = :email', { email })
+      if (nickname) qb.andWhere('User.nickname = :nickname', { nickname })
+    }
+
+    qb.skip(skip ?? 0)
+    qb.skip(take ?? 20)
+
+    const [items, total] = await qb.getManyAndCount()
+
+    return { items, total }
+  }
+}
+```
+
+현재 단계에서 `findAll` 함수는 `AND` 연산만 가능합니다. `닉네임이 ‘alfred’ 이거나, id가 5인 User`를 가져오지 못하지요. OR 연산이 가능하게 하려면 어떻게 해야할까요?
+
+여기서부터 대대적인 리팩터링이 필요합니다. where 에 객체가 들어가면 And이고, 배열을 넣으면 Or라고 인식하게 하면 어떨까요 ?
+
+> **ID가 5이고, Nickname이 'alfred'인 유저** > `this.userRepository.findAll({ where: {id: 5, nickname: 'alfred'} })` > **ID가 5이거나, Nickname이 'alfred'인 유저** > `this.userRepository.findAll({ where: [{id: 5},{nickname: 'alfred'}] })`
+
+먼저 `UserFindAllOptions` 타입을 다음과 같이 정의합니다.
+
+```typescript
+export interface UserFindAllWhereOptions {
+  id?: number
+  email?: string
+  nickname?: string
+}
+export interface UserFindAllOptions {
+  where?: UserFindAllWhereOptions | UserFindAllWhereOptions[]
+  skip?: number
+  take?: number
+}
+```
+
+그리고 `UserRepository` `findAll` 함수를 다음과 같이 정의합니다.
+
+```typescript
+// user.repository.ts
+import { AbstractRepository, Brackets, EntityRepository } from 'typeorm'
+import { User } from './user.entity'
+
+export interface UserFindAllWhereOptions {
+  id?: number
+  email?: string
+  nickname?: string
+}
+
+export interface UserFindAllOptions {
+  where?: UserFindAllWhereOptions | UserFindAllWhereOptions[]
+
+  skip?: number
+  take?: number
+}
+
+@EntityRepository(User)
+export class UserRepository extends AbstractRepository<User> {
+  // ...
+
+  public async findAll(options: UserFindAllOptions = {}) {
+    const { where, skip, take } = options
+
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    if (where) {
+      // 가장 상위에 AND 연산으로 괄호를 씌워줘야한다: ( (...) OR (...) OR (...) )
+      if (Array.isArray(where)) {
+        qb.andWhere(
+          new Brackets((qb) => {
+            // where이 배열이면 OR 연산: (...) OR (...) OR (...)
+            where.forEach((wh) => {
+              qb.orWhere(
+                // OR 연산
+                new Brackets((qb) => {
+                  // where의 배열 한 요소마다 괄호를 씌운다
+                  const { id, email, nickname } = wh
+                  if (id) qb.andWhere(`User.id = ${id}`)
+                  if (email) qb.andWhere(`User.email = "${email}"`)
+                  if (nickname) qb.andWhere(`User.nickname = "${nickname}"`)
+                })
+              )
+            })
+          })
+        )
+      } else {
+        const { id, email, nickname } = where
+        if (id) qb.andWhere('User.id = :id', { id })
+        if (email) qb.andWhere('User.email = :email', { email })
+        if (nickname) qb.andWhere('User.nickname = :nickname', { nickname })
+      }
+    }
+
+    qb.skip(skip ?? 0)
+    qb.skip(take ?? 20)
+
+    const [items, total] = await qb.getManyAndCount()
+
+    return { items, total }
+  }
+}
+```
+
+아직 불완전한 부분이 조금 있지만, OR 연산을 할 수 있는 뼈대는 완성했습니다! 하지만 `Repository` 클래스의 덩치가 너무 커져버렸습니다. 쿼리 빌더의 로직 연산이 많아졌기 때문입니다. 이를 `QueryApplier` 라는 클래스를 따로 만들어 수행하게 하면 어떨까요?
+
+먼저 커스텀 레포지토리 상위 추상 클래스를 정의하여 그 곳에서 `QueryApplier`를 합성시키겠습니다. `AbstractEntityRepository` 라는 `class`를 새로 만듭니다.
+
+```typescript
+// entity.repository.ts
+import { AbstractRepository, WhereExpression, Brackets, FindOperator } from 'typeorm'
+
+export abstract class AbstractEntityRepository<T> extends AbstractRepository<T> {
+  protected readonly queryApplier: EntityQueryApplier
+
+  constructor() {
+    super()
+    this.queryApplier = new EntityQueryApplier()
+  }
+}
+
+export interface BuildWhereOptionsFunction<T> {
+  ({ filterQuery, where }: { filterQuery: (query: string) => void; where: T }): void
+}
+
+export interface ApplyOptions<T> {
+  qb: WhereExpression
+  where?: T | T[]
+  buildWhereOptions: BuildWhereOptionsFunction<T>
+}
+
+class EntityQueryApplier {
+  public apply<T>({ qb, where, buildWhereOptions }: ApplyOptions<T>) {
+    if (!where) return
+
+    if (Array.isArray(where)) {
+      qb.andWhere(
+        new Brackets((qb) => {
+          where.forEach((wh) => {
+            qb.orWhere(
+              new Brackets((qb) => {
+                this.applyBuildOptions({ qb, where: wh, buildWhereOptions })
+              })
+            )
+          })
+        })
+      )
+    } else {
+      this.applyBuildOptions({ qb, where, buildWhereOptions })
+    }
+  }
+
+  private applyBuildOptions<T>({
+    qb,
+    where,
+    buildWhereOptions,
+  }: {
+    qb: WhereExpression
+    where: T
+    buildWhereOptions: BuildWhereOptionsFunction<T>
+  }) {
+    buildWhereOptions({
+      where,
+      filterQuery: (query: string) => {
+        qb.andWhere(query)
+      },
+    })
+  }
+}
+```
+
+> 위와 같이 queryBuilder의 where 로직을 따로 클래스로 빼냅니다.
+
+위 추상 레포지토리 클래스를 이용하여 `UserRepository`의 `findAll`을 리팩터링해보겠습니다.
+
+```typescript
+// user.repository.ts
+import { Brackets, EntityRepository } from 'typeorm'
+import { AbstractEntityRepository } from './entity.repository.v2'
+import { User } from './user.entity'
+
+export interface UserFindAllWhereOptions {
+  id?: number
+  email?: string
+  nickname?: string
+}
+
+export interface UserFindAllOptions {
+  where?: UserFindAllWhereOptions | UserFindAllWhereOptions[]
+
+  skip?: number
+  take?: number
+}
+
+@EntityRepository(User)
+export class UserRepository extends AbstractEntityRepository<User> {
+  // ...
+
+  public async findAll(options: UserFindAllOptions = {}) {
+    const { where, skip, take } = options
+
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    this.queryApplier.apply({
+      qb,
+      where,
+      buildWhereOptions: ({ filterQuery, where }) => {
+        const { id, email, nickname } = where
+
+        filterQuery(`User.id = ${id}`)
+        filterQuery(`User.email = "${email}"`) // 문자열은 큰 따옴표로 감싸줘야 합니다.
+        filterQuery(`User.nickname = "${nickname}"`)
+      },
+    })
+
+    qb.skip(skip ?? 0)
+    qb.skip(take ?? 20)
+
+    const [items, total] = await qb.getManyAndCount()
+
+    return { items, total }
+  }
+}
+```
+
+`UserRepository`는 `AbstractEntityRepository`를 상속받아 다음과 같이 쿼리 `where` 조회 로직을 `QueryApplier`로 위임합니다.
+
+앞으로 커스텀 레포지토리를 만들때마다 OR 조회를 포함한 로직을 간단하게 줄일 수 있게 되었습니다.
+
+## FindOperator로 연산자 범위 넓히기
+
+TypeORM Repository 기본 내장 함수인 `find`, `findOne`을 이용하면 컬럼 값에 다음과 같은 `FindOperator` (`In`, `LessThan`, `Like`등)를 사용할 수 있습니다.
+
+`this.userRepository.find({ where: { id: In([1,2,3,4,5]) } })`
+
+우리가 만든 `findOne`, `findAll`에도 이런 `FindOperator`를 적용할 수 있게 해보도록 하겠습니다.
+
+실제로 쿼리를 적용하는 부분은 `QueryApplier`의 `applyBuildOptions` 함수 내부의 `filterQuery` 입니다. 그 곳에 `FindOperator` 값이 들어갈 수 있도록 수정하겠습니다. 코드가 다소 길지만 여유를 갖고 읽어보시길 바랍니다.
+
+```typescript
+// entity.repository.ts
+import { isNil } from 'lodash'
+import { AbstractRepository, WhereExpression, Brackets, FindOperator } from 'typeorm'
+
+export type EntityFindOperator<T> = T | FindOperator<T>
+
+export abstract class AbstractEntityRepository<T> extends AbstractRepository<T> {
+  protected readonly queryApplier: EntityQueryApplier
+
+  constructor() {
+    super()
+    this.queryApplier = new EntityQueryApplier()
+  }
+}
+
+export interface BuildWhereOptionsFunction<T> {
+  ({
+    filterQuery,
+    where,
+  }: {
+    filterQuery: (property: string, valueOrOperator: any) => void
+    where: T
+  }): void
+}
+
+export interface ApplyOptions<T> {
+  qb: WhereExpression
+  where?: T | T[]
+  buildWhereOptions: BuildWhereOptionsFunction<T>
+}
+
+class EntityQueryApplier {
+  public apply<T>({ qb, where, buildWhereOptions }: ApplyOptions<T>) {
+    if (!where) return
+
+    if (Array.isArray(where)) {
+      qb.andWhere(
+        new Brackets((qb) => {
+          where.forEach((wh) => {
+            qb.orWhere(
+              new Brackets((qb) => {
+                this.applyBuildOptions({ qb, where: wh, buildWhereOptions })
+              })
+            )
+          })
+        })
+      )
+    } else {
+      this.applyBuildOptions({ qb, where, buildWhereOptions })
+    }
+  }
+
+  private applyBuildOptions<T>({
+    qb,
+    where,
+    buildWhereOptions,
+  }: {
+    qb: WhereExpression
+    where: T
+    buildWhereOptions: BuildWhereOptionsFunction<T>
+  }) {
+    buildWhereOptions({
+      where,
+      filterQuery: (property, valueOrOperator) => {
+        if (isNil(valueOrOperator)) return
+        qb.andWhere(this.computeFindOperatorExpression(property, valueOrOperator))
+      },
+    })
+  }
+
+  /**
+   * 컬럼과 비교값에 대한 Raw Query를 계산하여 반환해준다. Referenced by TypeORM.
+   * @param property Column 이름
+   * @param operator FindOperator 또는 직접 값(Literal은 Equal연산을 한다.)
+   * @returns
+   */
+  private computeFindOperatorExpression(property: string, operator: FindOperator<any> | any) {
+    const wrappedValue = (value: any) => {
+      // 큰 따옴표 파싱
+      if (typeof value === 'string') return `"${value.replace(/"/g, '\\"')}"`
+      else if (value instanceof Date) return `"${value.toISOString()}"`
+
+      return value
+    }
+
+    if (!(operator instanceof FindOperator)) return `${property} = ${wrappedValue(operator)}`
+
+    switch (operator.type) {
+      case 'not':
+        if (operator.child) {
+          return `NOT(${this.computeFindOperatorExpression(property, operator.child)})`
+        } else {
+          return `${property} != ${wrappedValue(operator.value)}`
+        }
+      case 'lessThan':
+        return `${property} < ${wrappedValue(operator.value)}`
+      case 'lessThanOrEqual':
+        return `${property} <= ${wrappedValue(operator.value)}`
+      case 'moreThan':
+        return `${property} > ${wrappedValue(operator.value)}`
+      case 'moreThanOrEqual':
+        return `${property} >= ${wrappedValue(operator.value)}`
+      case 'equal':
+        return `${property} = ${wrappedValue(operator.value)}`
+      case 'like':
+        return `${property} LIKE ${wrappedValue(operator.value)}`
+      case 'between':
+        return `${property} BETWEEN ${wrappedValue(operator.value[0])} AND ${wrappedValue(
+          operator.value[1]
+        )}`
+      case 'in':
+        if (operator.value.length === 0) {
+          return '0=1'
+        }
+        return `${property} IN (${operator.value.map((v) => wrappedValue(v)).join(', ')})`
+      case 'any':
+        return `${property} = ANY(${wrappedValue(operator.value)})`
+      case 'isNull':
+        return `${property} IS NULL`
+    }
+
+    throw new TypeError(`Unsupported FindOperator ${FindOperator.constructor.name}`)
+  }
+}
+```
+
+리팩터링된 `AbstractEntityRepository`를 토대로 `UserRepository`를 다음과 같이 수정합니다.
+
+```typescript
+// user.repository.ts
+import { EntityRepository } from 'typeorm'
+import { AbstractEntityRepository, EntityFindOperator } from './entity.repository'
+import { User } from './user.entity'
+
+export interface UserFindAllWhereOptions {
+  id?: EntityFindOperator<number> // export type EntityFindOperator<T> = T | FindOperator<T>
+  email?: EntityFindOperator<string>
+  nickname?: EntityFindOperator<string>
+}
+
+export interface UserFindAllOptions {
+  where?: UserFindAllWhereOptions | UserFindAllWhereOptions[]
+
+  skip?: number
+  take?: number
+}
+
+@EntityRepository(User)
+export class UserRepository extends AbstractEntityRepository<User> {
+  // ...
+  public async findAll(options: UserFindAllOptions = {}) {
+    const { where, skip, take } = options
+
+    const qb = this.repository
+      .createQueryBuilder('User')
+      .leftJoinAndSelect('User.userAuth', 'userAuth')
+      .leftJoinAndSelect('User.userProfile', 'userProfile')
+
+    this.queryApplier.apply({
+      qb,
+      where,
+      buildWhereOptions: ({ filterQuery, where }) => {
+        const { id, email, nickname } = where
+
+        filterQuery('User.id', id) // id는 FindOperator일수도, 리터럴 값일 수도 있습니다!
+        filterQuery('User.email', email)
+        filterQuery('User.nickname', nickname)
+      },
+    })
+
+    qb.skip(skip ?? 0)
+    qb.skip(take ?? 20)
+
+    const [items, total] = await qb.getManyAndCount()
+
+    return { items, total }
+  }
+}
+```
+
+이제 다 끝났습니다! 고생 많으셨습니다. 이제 `UserService`에서 다음과 같이 `Repository` 접근이 가능합니다.
+
+```typescript
+// user.service.ts
+import { Injectable } from '@nestjs/common'
+import { In, LessThan } from 'typeorm'
+import { UserRepository } from './user.repository'
+
+@Injectable()
+export class UserService {
+  constructor(private readonly userRepository: UserRepository) {}
+
+  // ...
+
+  public async findAllTest() {
+    // ID가 5보다 작거나, 닉네임이 alfred, beygee인 User를 반환합니다!
+    return this.userRepository.findAll({
+      where: [{ id: LessThan(5) }, { nickname: In(['alfred', 'beygee']) }],
+    })
+  }
+}
+```
+
+이토록 `Service`에서는 `Repository` `where` 조건문을 객체 형태로 날리고, `Repo`에서는 그 조건을 `QueryBuilder`로 변환하여 작업하는 로직을 구현해보았습니다.
+
+아직 여기저기 개선해야할 사항들이 보이고, 갈 길이 한참 남은 것 같습니다. 더 좋은 구현사항이 있다면 공유해주시면 감사하겠습니다.
+
+다음 포스트에는 `Repository`에서 객체의 영속성을 보장하면서 책임 기반 설계`(Single Table Inheritance Pattern)`를 하는 법을 살펴보도록 하겠습니다.
